@@ -22,6 +22,44 @@ const Machine = struct {
         return try std.fmt.parseUnsigned(u16, registerstr, 10);
     }
 
+    fn printVal(self: *Machine, val: u16) !void {
+        if (val <= 32767) {
+            std.debug.print("{any} ", .{val});
+        } else {
+            std.debug.print("r{any}:{any} ", .{ val - 32767, try self.getVal(val) });
+        }
+    }
+
+    fn printAt(self: *Machine, pc: u16) !u16 {
+        const args = [_]u8{ 1, 3, 2, 2, 4, 4, 2, 3, 3, 4, 4, 4, 4, 4, 3, 3, 3, 2, 1, 2, 2, 1 };
+        const names = [_][]const u8{ "halt", "set", "push", "pop", "eq", "gt", "jmp", "jt", "jf", "add", "mult", "mod", "and", "or", "not", "rmem", "wmem", "call", "ret", "out", "in", "noop" };
+        std.debug.print("{any} ", .{pc});
+        if (self.memory[pc] > 21) {
+            try self.printVal(self.memory[pc]);
+            std.debug.print("\n", .{});
+            return 1;
+        }
+        var k: u16 = 1;
+        std.debug.print("{s} ", .{names[self.memory[pc]]});
+        while (k < args[self.memory[pc]]) {
+            if (self.memory[pc + k] <= 32767) {
+                std.debug.print("{any} ", .{self.memory[pc + k]});
+            } else {
+                std.debug.print("r{any}:{any} ", .{ self.memory[pc + k] - 32767, try self.getVal(self.memory[pc + k]) });
+            }
+            k += 1;
+        }
+        std.debug.print("\n", .{});
+        return k;
+    }
+
+    fn dumpMemory(self: *Machine) !void {
+        var pc: u16 = 0;
+        while (pc < self.memory.len) {
+            pc += try self.printAt(pc);
+        }
+    }
+
     fn getByte(self: *Machine, stdin: anytype) !u8 {
         var byte = try stdin.readByte();
         while (byte == '!') {
@@ -36,10 +74,12 @@ const Machine = struct {
                 var value = try getInt(stdin, &buffer, '\n');
                 std.debug.print("Setting register {any} to {any}\n", .{ register, value });
                 self.registers[register] = value;
-            } else {
+            } else if (command == 3) {
                 var value = try getInt(stdin, &buffer, '\n');
                 std.debug.print("Setting debug to {any}\n", .{value});
                 self.debug = value > 0;
+            } else {
+                try self.dumpMemory();
             }
             byte = try stdin.readByte();
         }
@@ -50,8 +90,13 @@ const Machine = struct {
         var pc: u16 = 0;
 
         while (true) {
+            if (pc == 6027) {
+                self.registers[0] = 6;
+                pc = self.stack.pop();
+                continue;
+            }
             if (self.debug) {
-                try stdout.print("Running opcode {any} at pc {}\n", .{ self.memory[pc], pc });
+                _ = try self.printAt(pc);
             }
             switch (self.memory[pc]) {
                 0 => {
@@ -159,7 +204,9 @@ const Machine = struct {
                     pc += 2;
                 },
                 20 => {
-                    var x: u16 = try self.getByte(stdin);
+                    var x: u16 = self.getByte(stdin) catch {
+                        return;
+                    };
                     try self.setVal(self.memory[pc + 1], x);
                     pc += 2;
                 },
@@ -167,8 +214,8 @@ const Machine = struct {
                     pc += 1;
                 },
                 else => {
-                    std.debug.print("Unknown opcode: {any}\n", .{self.memory[pc]});
-                    return error.UnImplementedError;
+                    std.debug.print("Unknown opcode {any} at {any}\n", .{ self.memory[pc], pc });
+                    return;
                 },
             }
         }
