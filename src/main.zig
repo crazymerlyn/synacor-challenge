@@ -4,6 +4,7 @@ const Machine = struct {
     memory: []u16,
     registers: [8]u16,
     stack: std.ArrayList(u16),
+    debug: bool = false,
 
     fn getVal(self: *Machine, x: u16) !u16 {
         return if (x < 32768) x else if (x < 32776) self.registers[x - 32768] else error.InvalidArgs;
@@ -14,11 +15,44 @@ const Machine = struct {
         self.registers[x - 32768] = val;
     }
 
+    fn getInt(stdin: anytype, buffer: []u8, delimiter: u8) !u16 {
+        const registerstr = try stdin.readUntilDelimiterOrEof(buffer, delimiter) orelse {
+            return error.EndOfStream;
+        };
+        return try std.fmt.parseUnsigned(u16, registerstr, 10);
+    }
+
+    fn getByte(self: *Machine, stdin: anytype) !u8 {
+        var byte = try stdin.readByte();
+        while (byte == '!') {
+            var buffer: [100]u8 = undefined;
+            const command = try getInt(stdin, &buffer, ' ');
+
+            if (command == 1) {
+                const register = try getInt(stdin, &buffer, '\n') - 1;
+                std.debug.print("Register {any} is {any}\n", .{ register, self.registers[register] });
+            } else if (command == 2) {
+                var register = try getInt(stdin, &buffer, ' ') - 1;
+                var value = try getInt(stdin, &buffer, '\n');
+                std.debug.print("Setting register {any} to {any}\n", .{ register, value });
+                self.registers[register] = value;
+            } else {
+                var value = try getInt(stdin, &buffer, '\n');
+                std.debug.print("Setting debug to {any}\n", .{value});
+                self.debug = value > 0;
+            }
+            byte = try stdin.readByte();
+        }
+        return byte;
+    }
+
     pub fn run(self: *Machine, stdin: anytype, stdout: anytype) !void {
         var pc: u16 = 0;
 
         while (true) {
-            // std.debug.print("Running opcode: {any}\n", .{self.memory[pc]});
+            if (self.debug) {
+                try stdout.print("Running opcode {any} at pc {}\n", .{ self.memory[pc], pc });
+            }
             switch (self.memory[pc]) {
                 0 => {
                     return;
@@ -125,7 +159,7 @@ const Machine = struct {
                     pc += 2;
                 },
                 20 => {
-                    var x: u16 = try stdin.readByte();
+                    var x: u16 = try self.getByte(stdin);
                     try self.setVal(self.memory[pc + 1], x);
                     pc += 2;
                 },
